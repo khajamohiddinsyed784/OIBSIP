@@ -1,0 +1,416 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+from datetime import datetime
+import matplotlib.pyplot as plt
+
+
+# ---------------- DATABASE ----------------
+
+def create_database():
+    try:
+        conn = sqlite3.connect("bmi_records.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS bmi_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                weight REAL NOT NULL,
+                height REAL NOT NULL,
+                bmi REAL NOT NULL,
+                category TEXT NOT NULL,
+                date TEXT NOT NULL
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    except sqlite3.Error as e:
+        messagebox.showerror(
+            "Database Error",
+            f"Could not create database:\n{e}"
+        )
+
+
+# ---------------- BMI CALCULATION ----------------
+
+def calculate_bmi():
+    username = name_entry.get().strip()
+    weight_text = weight_entry.get().strip()
+    height_text = height_entry.get().strip()
+
+    # Validate name
+    if not username:
+        messagebox.showerror("Input Error", "Please enter a user name.")
+        return
+
+    # Validate numeric input
+    try:
+        weight = float(weight_text)
+        height = float(height_text)
+    except ValueError:
+        messagebox.showerror(
+            "Input Error",
+            "Weight and height must be numeric values."
+        )
+        return
+
+    # Validate positive values
+    if weight <= 0:
+        messagebox.showerror(
+            "Input Error",
+            "Weight must be greater than 0."
+        )
+        return
+
+    if height <= 0:
+        messagebox.showerror(
+            "Input Error",
+            "Height must be greater than 0."
+        )
+        return
+
+    # Calculate BMI
+    bmi = weight / (height ** 2)
+
+    # Classify BMI
+    if bmi < 18.5:
+        category = "Underweight"
+        result_color = "orange"
+
+    elif bmi < 25:
+        category = "Normal"
+        result_color = "green"
+
+    elif bmi < 30:
+        category = "Overweight"
+        result_color = "orange"
+
+    else:
+        category = "Obese"
+        result_color = "red"
+
+    # Display result
+    result_label.config(
+        text=f"BMI: {bmi:.2f}\nCategory: {category}",
+        foreground=result_color
+    )
+
+    # Save record
+    save_record(username, weight, height, bmi, category)
+
+
+# ---------------- SAVE RECORD ----------------
+
+def save_record(username, weight, height, bmi, category):
+    try:
+        conn = sqlite3.connect("bmi_records.db")
+        cursor = conn.cursor()
+
+        date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        cursor.execute("""
+            INSERT INTO bmi_records
+            (username, weight, height, bmi, category, date)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (username, weight, height, bmi, category, date))
+
+        conn.commit()
+        conn.close()
+
+        load_history()
+
+    except sqlite3.Error as e:
+        messagebox.showerror(
+            "Database Error",
+            f"Could not save BMI record:\n{e}"
+        )
+
+
+# ---------------- LOAD HISTORY ----------------
+
+def load_history():
+    for item in history_tree.get_children():
+        history_tree.delete(item)
+
+    try:
+        conn = sqlite3.connect("bmi_records.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT username, weight, height, bmi, category, date
+            FROM bmi_records
+            ORDER BY id DESC
+        """)
+
+        records = cursor.fetchall()
+        conn.close()
+
+        for record in records:
+            history_tree.insert("", tk.END, values=record)
+
+    except sqlite3.Error as e:
+        messagebox.showerror(
+            "Database Error",
+            f"Could not read BMI records:\n{e}"
+        )
+
+
+# ---------------- SHOW BMI TREND ----------------
+
+def show_trend():
+    username = name_entry.get().strip()
+
+    if not username:
+        messagebox.showerror(
+            "Input Error",
+            "Enter a user name to view the BMI trend."
+        )
+        return
+
+    try:
+        conn = sqlite3.connect("bmi_records.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT date, bmi
+            FROM bmi_records
+            WHERE username = ?
+            ORDER BY id ASC
+        """, (username,))
+
+        records = cursor.fetchall()
+        conn.close()
+
+        if not records:
+            messagebox.showinfo(
+                "No Data",
+                f"No BMI records found for {username}."
+            )
+            return
+
+        dates = [record[0] for record in records]
+        bmi_values = [record[1] for record in records]
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(
+            dates,
+            bmi_values,
+            marker="o"
+        )
+
+        plt.title(f"BMI Trend - {username}")
+        plt.xlabel("Date")
+        plt.ylabel("BMI")
+        plt.xticks(rotation=45)
+        plt.grid(True)
+
+        # Reference lines
+        plt.axhline(
+            y=18.5,
+            linestyle="--",
+            label="Underweight limit"
+        )
+
+        plt.axhline(
+            y=25,
+            linestyle="--",
+            label="Normal limit"
+        )
+
+        plt.axhline(
+            y=30,
+            linestyle="--",
+            label="Obese limit"
+        )
+
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    except sqlite3.Error as e:
+        messagebox.showerror(
+            "Database Error",
+            f"Could not load BMI trend:\n{e}"
+        )
+
+
+# ---------------- CLEAR INPUTS ----------------
+
+def clear_inputs():
+    name_entry.delete(0, tk.END)
+    weight_entry.delete(0, tk.END)
+    height_entry.delete(0, tk.END)
+
+    result_label.config(
+        text="BMI: --\nCategory: --",
+        foreground="black"
+    )
+
+
+# ---------------- GUI ----------------
+
+root = tk.Tk()
+root.title("BMI Calculator")
+root.geometry("850x650")
+root.resizable(False, False)
+
+create_database()
+
+# Title
+title_label = ttk.Label(
+    root,
+    text="BMI Calculator",
+    font=("Arial", 24, "bold")
+)
+title_label.pack(pady=15)
+
+subtitle_label = ttk.Label(
+    root,
+    text="Calculate and track your Body Mass Index",
+    font=("Arial", 11)
+)
+subtitle_label.pack()
+
+# Input frame
+input_frame = ttk.LabelFrame(
+    root,
+    text="Enter Details",
+    padding=15
+)
+input_frame.pack(
+    padx=20,
+    pady=15,
+    fill="x"
+)
+
+# Name
+ttk.Label(
+    input_frame,
+    text="User Name:"
+).grid(row=0, column=0, padx=10, pady=8, sticky="w")
+
+name_entry = ttk.Entry(
+    input_frame,
+    width=30
+)
+name_entry.grid(row=0, column=1, padx=10, pady=8)
+
+# Weight
+ttk.Label(
+    input_frame,
+    text="Weight (kg):"
+).grid(row=1, column=0, padx=10, pady=8, sticky="w")
+
+weight_entry = ttk.Entry(
+    input_frame,
+    width=30
+)
+weight_entry.grid(row=1, column=1, padx=10, pady=8)
+
+# Height
+ttk.Label(
+    input_frame,
+    text="Height (m):"
+).grid(row=2, column=0, padx=10, pady=8, sticky="w")
+
+height_entry = ttk.Entry(
+    input_frame,
+    width=30
+)
+height_entry.grid(row=2, column=1, padx=10, pady=8)
+
+# Buttons
+button_frame = ttk.Frame(root)
+button_frame.pack(pady=5)
+
+calculate_button = ttk.Button(
+    button_frame,
+    text="Calculate BMI",
+    command=calculate_bmi
+)
+calculate_button.grid(row=0, column=0, padx=5)
+
+trend_button = ttk.Button(
+    button_frame,
+    text="Show BMI Trend",
+    command=show_trend
+)
+trend_button.grid(row=0, column=1, padx=5)
+
+clear_button = ttk.Button(
+    button_frame,
+    text="Clear",
+    command=clear_inputs
+)
+clear_button.grid(row=0, column=2, padx=5)
+
+# Result
+result_label = ttk.Label(
+    root,
+    text="BMI: --\nCategory: --",
+    font=("Arial", 18, "bold"),
+    justify="center"
+)
+result_label.pack(pady=15)
+
+# History
+history_frame = ttk.LabelFrame(
+    root,
+    text="BMI History",
+    padding=10
+)
+history_frame.pack(
+    padx=20,
+    pady=10,
+    fill="both",
+    expand=True
+)
+
+columns = (
+    "User",
+    "Weight",
+    "Height",
+    "BMI",
+    "Category",
+    "Date"
+)
+
+history_tree = ttk.Treeview(
+    history_frame,
+    columns=columns,
+    show="headings",
+    height=8
+)
+
+for column in columns:
+    history_tree.heading(column, text=column)
+    history_tree.column(
+        column,
+        width=115,
+        anchor="center"
+    )
+
+history_tree.pack(
+    side="left",
+    fill="both",
+    expand=True
+)
+
+scrollbar = ttk.Scrollbar(
+    history_frame,
+    orient="vertical",
+    command=history_tree.yview
+)
+
+scrollbar.pack(side="right", fill="y")
+
+history_tree.configure(
+    yscrollcommand=scrollbar.set
+)
+
+load_history()
+
+root.mainloop()
